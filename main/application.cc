@@ -17,11 +17,11 @@
 #include <arpa/inet.h>
 #include <font_awesome.h>
 
-#define TAG "Application"
+#define TAG "Application"/*日志标签Application*/
 
 
-Application::Application() {
-    event_group_ = xEventGroupCreate();
+Application::Application() {/*Application类的构造函数*/
+    event_group_ = xEventGroupCreate();/*创建事件组，用于任务间通信*/
 
 #if CONFIG_USE_DEVICE_AEC && CONFIG_USE_SERVER_AEC
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
@@ -33,20 +33,20 @@ Application::Application() {
     aec_mode_ = kAecOff;
 #endif
 
-    esp_timer_create_args_t clock_timer_args = {
+    esp_timer_create_args_t clock_timer_args = {/*创建周期性定时器，用于时钟更新*/
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
-            xEventGroupSetBits(app->event_group_, MAIN_EVENT_CLOCK_TICK);
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_CLOCK_TICK);/*定期器触发置时钟跳变事件为1*/
         },
         .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
+        .dispatch_method = ESP_TIMER_TASK,/*指定定时器回调函数在任务上下文中执行*/
         .name = "clock_timer",
-        .skip_unhandled_events = true
+        .skip_unhandled_events = true/*如果定时器事件未被及时处理，跳过后续事件以避免积压*/
     };
-    esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+    esp_timer_create(&clock_timer_args, &clock_timer_handle_);/*创建定时器参数指针和句柄指针*/
 }
 
-Application::~Application() {
+Application::~Application() {/*Application类的析构函数*/
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
