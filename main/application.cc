@@ -17,11 +17,11 @@
 #include <arpa/inet.h>
 #include <font_awesome.h>
 
-#define TAG "Application"
+#define TAG "Application"/*日志标签Application*/
 
 
-Application::Application() {
-    event_group_ = xEventGroupCreate();
+Application::Application() {/*Application类的构造函数*/
+    event_group_ = xEventGroupCreate();/*创建事件组，用于任务间通信*/
 
 #if CONFIG_USE_DEVICE_AEC && CONFIG_USE_SERVER_AEC
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
@@ -33,20 +33,20 @@ Application::Application() {
     aec_mode_ = kAecOff;
 #endif
 
-    esp_timer_create_args_t clock_timer_args = {
+    esp_timer_create_args_t clock_timer_args = {/*创建周期性定时器，用于时钟更新*/
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
-            xEventGroupSetBits(app->event_group_, MAIN_EVENT_CLOCK_TICK);
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_CLOCK_TICK);/*定期器触发置时钟跳变事件为1*/
         },
         .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
+        .dispatch_method = ESP_TIMER_TASK,/*指定定时器回调函数在任务上下文中执行*/
         .name = "clock_timer",
-        .skip_unhandled_events = true
+        .skip_unhandled_events = true/*如果定时器事件未被及时处理，跳过后续事件以避免积压*/
     };
-    esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+    esp_timer_create(&clock_timer_args, &clock_timer_handle_);/*创建定时器参数指针和句柄指针*/
 }
 
-Application::~Application() {
+Application::~Application() {/*Application类的析构函数*/
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
@@ -64,7 +64,7 @@ void Application::Initialize() {
 
     // Setup the display
     auto display = board.GetDisplay();
-
+    display->SetupUI();
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
@@ -309,13 +309,15 @@ void Application::HandleActivationDoneEvent() {
     display->ShowNotification(message.c_str());
     display->SetChatMessage("system", "");
 
-    // Play the success sound to indicate the device is ready
-    audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
-
     // Release OTA object after activation is complete
     ota_.reset();
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+
+    Schedule([this]() {
+        // Play the success sound to indicate the device is ready
+        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+    });
 }
 
 void Application::ActivationTask() {
@@ -691,7 +693,7 @@ void Application::HandleToggleChatEvent() {
     }
 
     if (state == kDeviceStateIdle) {
-        ListeningMode mode = aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
+        ListeningMode mode = GetDefaultListeningMode();
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -777,7 +779,9 @@ void Application::HandleWakeWordDetectedEvent() {
     }
 
     auto state = GetDeviceState();
-    
+    auto wake_word = audio_service_.GetLastWakeWord();
+    ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
+
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
         auto wake_word = audio_service_.GetLastWakeWord();
@@ -793,8 +797,22 @@ void Application::HandleWakeWordDetectedEvent() {
         }
         // Channel already opened, continue directly
         ContinueWakeWordInvoke(wake_word);
-    } else if (state == kDeviceStateSpeaking) {
+    } else if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
+        // Clear send queue to avoid sending residues to server
+        while (audio_service_.PopPacketFromSendQueue());
+
+        if (state == kDeviceStateListening) {
+            protocol_->SendStartListening(GetDefaultListeningMode());
+            audio_service_.ResetDecoder();
+            audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+            // Re-enable wake word detection as it was stopped by the detection itself
+            audio_service_.EnableWakeWordDetection(true);
+        } else {
+            // Play popup sound and start listening again
+            play_popup_on_listening_ = true;
+            SetListeningMode(GetDefaultListeningMode());
+        }
     } else if (state == kDeviceStateActivating) {
         // Restart the activation check if the wake word is detected during activation
         SetDeviceState(kDeviceStateIdle);
@@ -822,12 +840,15 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     }
     // Set the chat state to wake word detected
     protocol_->SendWakeWordDetected(wake_word);
-    SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+
+    // Set flag to play popup sound after state changes to listening
+    play_popup_on_listening_ = true;
+    SetListeningMode(GetDefaultListeningMode());
 #else
     // Set flag to play popup sound after state changes to listening
     // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
     play_popup_on_listening_ = true;
-    SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+    SetListeningMode(GetDefaultListeningMode());
 #endif
 }
 
@@ -859,7 +880,7 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral");
 
             // Make sure the audio processor is running
-            if (!audio_service_.IsAudioProcessorRunning()) {
+            if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
                 // For auto mode, wait for playback queue to be empty before enabling voice processing
                 // This prevents audio truncation when STOP arrives late due to network jitter
                 if (listening_mode_ == kListeningModeAutoStop) {
@@ -869,9 +890,16 @@ void Application::HandleStateChangedEvent() {
                 // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
                 audio_service_.EnableVoiceProcessing(true);
-                audio_service_.EnableWakeWordDetection(false);
             }
 
+#ifdef CONFIG_WAKE_WORD_DETECTION_IN_LISTENING
+            // Enable wake word detection in listening mode (configured via Kconfig)
+            audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+#else
+            // Disable wake word detection in listening mode
+            audio_service_.EnableWakeWordDetection(false);
+#endif
+            
             // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
             if (play_popup_on_listening_) {
                 play_popup_on_listening_ = false;
@@ -917,6 +945,10 @@ void Application::AbortSpeaking(AbortReason reason) {
 void Application::SetListeningMode(ListeningMode mode) {
     listening_mode_ = mode;
     SetDeviceState(kDeviceStateListening);
+}
+
+ListeningMode Application::GetDefaultListeningMode() const {
+    return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
 }
 
 void Application::Reboot() {
