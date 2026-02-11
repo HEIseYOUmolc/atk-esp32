@@ -68,7 +68,7 @@ void Application::Initialize() {
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
-    // Setup the audio service
+    /*设置音频服务*/
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
@@ -85,19 +85,20 @@ void Application::Initialize() {
     };
     audio_service_.SetCallbacks(callbacks);
 
+    /*添加设备状态监听，改变时设置事件标志位MAIN_EVENT_STATE_CHANGED*/
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
     });
 
-    // Start the clock timer to update the status bar
+    /*启动时钟定时器来更新状态栏*/
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-    // Add MCP common tools (only once during initialization)
+    /*添加MCP工具（仅在初始化中运行一次）*/
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
-
+    
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         auto display = Board::GetInstance().GetDisplay();

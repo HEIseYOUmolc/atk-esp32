@@ -338,7 +338,7 @@ private:
     void GetToolsList(int id, const std::string& cursor, bool list_user_only_tools);
     void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
 
-    std::vector<McpTool*> tools_;
+    std::vector<McpTool*> tools_;/*McpServer 内部维护一个可动态增长的工具列表，每个元素是指向 McpTool 对象的指针，用于存储和管理所有已注册的工具。 */
 };
 
 #endif // MCP_SERVER_H

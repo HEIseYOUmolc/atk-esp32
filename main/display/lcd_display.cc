@@ -169,8 +169,6 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-
-    SetupUI();
 }
 
 
@@ -232,8 +230,6 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-
-    SetupUI();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -285,8 +281,6 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-
-    SetupUI();
 }
 
 LcdDisplay::~LcdDisplay() {
@@ -1038,8 +1032,6 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         gif_controller_ = std::make_unique<LvglGif>(image->image_dsc());
         
         if (gif_controller_->IsLoaded()) {
-            // Set loop delay to 1000ms
-            gif_controller_->SetLoopDelay(3000);
             // Set up frame update callback
             gif_controller_->SetFrameCallback([this]() {
                 lv_image_set_src(emoji_image_, gif_controller_->image_dsc());
