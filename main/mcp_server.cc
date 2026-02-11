@@ -20,72 +20,90 @@
 
 #define TAG "MCP"
 
-McpServer::McpServer() {
+McpServer::McpServer() {/*McpServer类构造函数*/
 }
 
-McpServer::~McpServer() {
-    for (auto tool : tools_) {
+McpServer::~McpServer() {/*McpServer类析构函数*/
+    for (auto tool : tools_) {/*删除tools_容器，持有多个Tool*/
         delete tool;
     }
     tools_.clear();
 }
 
-void McpServer::AddCommonTools() {
-    // *Important* To speed up the response time, we add the common tools to the beginning of
-    // the tools list to utilize the prompt cache.
+void McpServer::AddCommonTools() {/*添加常用工具：常用工具+原始工具*/
     // **重要** 为了提升响应速度，我们把常用的工具放在前面，利用 prompt cache 的特性。
 
-    // Backup the original tools list and restore it after adding the common tools.
-    auto original_tools = std::move(tools_);
+    /*备份原始工具列表 */
+    auto original_tools = std::move(tools_);/* std::move 将 tools_ 的内部资源移动到 original_tools*/
     auto& board = Board::GetInstance();
 
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
 
-    AddTool("self.get_device_status",
+    AddTool("self.get_device_status",/*工具名称：获取设备状态工具*/
+        /*LLM使用说明：提供设备的实时信息，包括音频扬声器、屏幕、电池、网络等当前状态。
+                      在以下情况下使用该工具：
+                      1.用于回答关于当前状态的问题（例如：当前扬声器音量是多少？）
+                      2/作为控制设备前的第一步（例如：调高或调低扬声器音量等）*/
         "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
         "Use this tool for: \n"
         "1. Answering questions about current condition (e.g. what is the current volume of the audio speaker?)\n"
         "2. As the first step to control the device (e.g. turn up / down the volume of the audio speaker, etc.)",
-        PropertyList(),
-        [&board](const PropertyList& properties) -> ReturnValue {
-            return board.GetDeviceStatusJson();
+        PropertyList(),/*参数定义：空*/ 
+        [&board](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
+            return board.GetDeviceStatusJson();/*返回设备的状态json数据*/
         });
 
-    AddTool("self.audio_speaker.set_volume", 
+    AddTool("self.audio_speaker.set_volume", /*工具名称：设置音频扬声器音量工具*/
+        /*LLM使用说明：设置音频扬声器的音量。
+                       如果当前音量未知，必须先调用 `self.get_device_status` 工具，然后才能调用此工具。*/
         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
-        PropertyList({
+        PropertyList({/*参数定义：volume，0~100*/ 
             Property("volume", kPropertyTypeInteger, 0, 100)
         }), 
-        [&board](const PropertyList& properties) -> ReturnValue {
+        [&board](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
             return true;
         });
     
-    auto backlight = board.GetBacklight();
-    if (backlight) {
-        AddTool("self.screen.set_brightness",
+    AddTool("self.led.turn_on",/*工具名称：开启板载LED*/
+        /*LLM使用说明：开启板载LED灯。*/
+        "Turn on the onboard LED.",
+        PropertyList(),/*参数定义：空*/
+        [&board](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
+
+            //auto gpio = board.GetLedGpio();
+            //led->On(); //打开LED灯
+            ESP_LOGW(TAG, "Turn on LED (not implemented)");/*日志输出：开启LED（未实现）*/
+            return true;
+        });
+
+    auto backlight = board.GetBacklight();/*获取背光亮度 */
+    if (backlight) {/*有开启背光*/
+        AddTool("self.screen.set_brightness",/*工具名称：设置屏幕亮度工具*/
+            /*LLM使用说明：设置屏幕亮度。*/
             "Set the brightness of the screen.",
-            PropertyList({
+            PropertyList({/*参数定义：brightness，0~100*/ 
                 Property("brightness", kPropertyTypeInteger, 0, 100)
             }),
-            [backlight](const PropertyList& properties) -> ReturnValue {
+            [backlight](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
                 uint8_t brightness = static_cast<uint8_t>(properties["brightness"].value<int>());
                 backlight->SetBrightness(brightness, true);
                 return true;
             });
     }
 
-#ifdef HAVE_LVGL
-    auto display = board.GetDisplay();
+#ifdef HAVE_LVGL/*启用LVGL */
+    auto display = board.GetDisplay();/*从 Board 单例获取显示设备接口*/
     if (display && display->GetTheme() != nullptr) {
-        AddTool("self.screen.set_theme",
+        AddTool("self.screen.set_theme",/*工具名称：设置屏幕主题工具*/
+            /*LLM使用说明：设置屏幕主题。主题可以是 `light` 或 `dark`*/
             "Set the theme of the screen. The theme can be `light` or `dark`.",
-            PropertyList({
+            PropertyList({/*参数定义：theme，json字符串*/
                 Property("theme", kPropertyTypeString)
             }),
-            [display](const PropertyList& properties) -> ReturnValue {
+            [display](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
                 auto theme_name = properties["theme"].value<std::string>();
                 auto& theme_manager = LvglThemeManager::GetInstance();
                 auto theme = theme_manager.GetTheme(theme_name);
@@ -97,15 +115,19 @@ void McpServer::AddCommonTools() {
             });
     }
 
-    auto camera = board.GetCamera();
+    auto camera = board.GetCamera();/*从 Board 单例获取摄像头设备接口*/
     if (camera) {
-        AddTool("self.camera.take_photo",
+        AddTool("self.camera.take_photo",/*工具名称：拍照工具*/
+            /*LLM使用说明：拍照工具。当用户要求查看某物时，使用此工具拍照并解释照片内容。
+                       参数：`question`: 你想对照片提出的问题。
+                       返回：一个 JSON 对象，提供照片信息。
+                       */
             "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
             "Args:\n"
             "  `question`: The question that you want to ask about the photo.\n"
             "Return:\n"
             "  A JSON object that provides the photo information.",
-            PropertyList({
+            PropertyList({/*参数定义：question，json字符串*/
                 Property("question", kPropertyTypeString)
             }),
             [camera](const PropertyList& properties) -> ReturnValue {
@@ -120,24 +142,25 @@ void McpServer::AddCommonTools() {
             });
     }
 #endif
-
-    // Restore the original tools list to the end of the tools list
+    /*将原始工具列表恢复并追加到当前工具列表的末尾。*/
     tools_.insert(tools_.end(), original_tools.begin(), original_tools.end());
 }
 
-void McpServer::AddUserOnlyTools() {
+void McpServer::AddUserOnlyTools() {/*添加用户工具*/
     // System tools
-    AddUserOnlyTool("self.get_system_info",
+    AddUserOnlyTool("self.get_system_info",/*工具名称：获取系统信息工具*/
+        /*LLM使用说明：获取系统信息*/
         "Get the system information",
-        PropertyList(),
-        [this](const PropertyList& properties) -> ReturnValue {
+        PropertyList(),/*参数定义：空*/
+        [this](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
             auto& board = Board::GetInstance();
             return board.GetSystemInfoJson();
         });
 
-    AddUserOnlyTool("self.reboot", "Reboot the system",
-        PropertyList(),
-        [this](const PropertyList& properties) -> ReturnValue {
+    AddUserOnlyTool("self.reboot", /*工具名称：重启系统工具*/
+        "Reboot the system",/*LLM使用说明：重启系统工具*/
+        PropertyList(),/*参数定义：空*/
+        [this](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
             auto& app = Application::GetInstance();
             app.Schedule([&app]() {
                 ESP_LOGW(TAG, "User requested reboot");
@@ -149,11 +172,13 @@ void McpServer::AddUserOnlyTools() {
         });
 
     // Firmware upgrade
-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
-        PropertyList({
+    AddUserOnlyTool("self.upgrade_firmware", /*工具名称：升级固件工具*/
+        /*LLM使用说明：升级固件工具*/
+        "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
+        PropertyList({/*参数定义：地址，json字符串*/
             Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
         }),
-        [this](const PropertyList& properties) -> ReturnValue {
+        [this](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
             auto url = properties["url"].value<std::string>();
             ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
             
@@ -172,9 +197,11 @@ void McpServer::AddUserOnlyTools() {
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (display) {
-        AddUserOnlyTool("self.screen.get_info", "Information about the screen, including width, height, etc.",
-            PropertyList(),
-            [display](const PropertyList& properties) -> ReturnValue {
+        AddUserOnlyTool("self.screen.get_info", /*工具名称：获取屏幕信息工具*/
+            /*LLM使用说明：获取屏幕信息，包括宽度，高度，等等*/
+            "Information about the screen, including width, height, etc.",
+            PropertyList(),/*参数定义：空*/
+            [display](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
                 cJSON *json = cJSON_CreateObject();
                 cJSON_AddNumberToObject(json, "width", display->width());
                 cJSON_AddNumberToObject(json, "height", display->height());
@@ -287,11 +314,13 @@ void McpServer::AddUserOnlyTools() {
     // Assets download url
     auto& assets = Assets::GetInstance();
     if (assets.partition_valid()) {
-        AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
-            PropertyList({
+        AddUserOnlyTool("self.assets.set_download_url", /*工具名称：设置资产下载地址工具*/
+            /*LLM使用说明：设置资产的下载地址*/
+            "Set the download url for the assets",
+            PropertyList({/*参数定义：地址，json字符串*/
                 Property("url", kPropertyTypeString)
             }),
-            [](const PropertyList& properties) -> ReturnValue {
+            [](const PropertyList& properties) -> ReturnValue {/*lambda实际执行逻辑*/
                 auto url = properties["url"].value<std::string>();
                 Settings settings("assets", true);
                 settings.SetString("download_url", url);
