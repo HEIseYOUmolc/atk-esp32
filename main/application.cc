@@ -54,13 +54,13 @@ Application::~Application() {/*Application类的析构函数*/
     vEventGroupDelete(event_group_);
 }
 
-bool Application::SetDeviceState(DeviceState state) {
+bool Application::SetDeviceState(DeviceState state) {/*设置设备状态函数，返回状态转换是否成功*/
     return state_machine_.TransitionTo(state);
 }
 
 void Application::Initialize() {
     auto& board = Board::GetInstance();
-    SetDeviceState(kDeviceStateStarting);
+    SetDeviceState(kDeviceStateStarting);/*设置设备状态为启动中*/
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -99,6 +99,7 @@ void Application::Initialize() {
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
     
+    /*设置网络事件用于UI和网络处理*/
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
         auto display = Board::GetInstance().GetDisplay();
@@ -165,8 +166,8 @@ void Application::Initialize() {
 
 void Application::Run() {
     // Set the priority of the main task to 10
-    vTaskPrioritySet(nullptr, 10);
-
+    vTaskPrioritySet(nullptr, 10);/*设置该任务优先级为10*/
+    /*所有事件*/
     const EventBits_t ALL_EVENTS = 
         MAIN_EVENT_SCHEDULE |
         MAIN_EVENT_SEND_AUDIO |
@@ -182,43 +183,44 @@ void Application::Run() {
         MAIN_EVENT_ACTIVATION_DONE |
         MAIN_EVENT_STATE_CHANGED;
 
-    while (true) {
+    while (true) {/*主循环*/
+        /*等待所有事件，任一事件触发即返回*/
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
-        if (bits & MAIN_EVENT_ERROR) {
-            SetDeviceState(kDeviceStateIdle);
+        if (bits & MAIN_EVENT_ERROR) {/*触发错误事件*/
+            SetDeviceState(kDeviceStateIdle);/*设置设备状态为空闲*/
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
 
-        if (bits & MAIN_EVENT_NETWORK_CONNECTED) {
+        if (bits & MAIN_EVENT_NETWORK_CONNECTED) {/*触发网络连接事件*/
             HandleNetworkConnectedEvent();
         }
 
-        if (bits & MAIN_EVENT_NETWORK_DISCONNECTED) {
+        if (bits & MAIN_EVENT_NETWORK_DISCONNECTED) {/*触发网络断开事件*/
             HandleNetworkDisconnectedEvent();
         }
 
-        if (bits & MAIN_EVENT_ACTIVATION_DONE) {
+        if (bits & MAIN_EVENT_ACTIVATION_DONE) {/*触发激活完成事件*/
             HandleActivationDoneEvent();
         }
 
-        if (bits & MAIN_EVENT_STATE_CHANGED) {
+        if (bits & MAIN_EVENT_STATE_CHANGED) {/*触发状态变更事件*/
             HandleStateChangedEvent();
         }
 
-        if (bits & MAIN_EVENT_TOGGLE_CHAT) {
+        if (bits & MAIN_EVENT_TOGGLE_CHAT) {/*触发聊天切换事件*/
             HandleToggleChatEvent();
         }
 
-        if (bits & MAIN_EVENT_START_LISTENING) {
+        if (bits & MAIN_EVENT_START_LISTENING) {/*触发开始监听事件*/
             HandleStartListeningEvent();
         }
 
-        if (bits & MAIN_EVENT_STOP_LISTENING) {
+        if (bits & MAIN_EVENT_STOP_LISTENING) {/*触发停止监听事件*/
             HandleStopListeningEvent();
         }
 
-        if (bits & MAIN_EVENT_SEND_AUDIO) {
+        if (bits & MAIN_EVENT_SEND_AUDIO) {/*发送音频事件*/
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     break;
@@ -226,18 +228,18 @@ void Application::Run() {
             }
         }
 
-        if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
+        if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {/*触发唤醒词检测事件*/
             HandleWakeWordDetectedEvent();
         }
 
-        if (bits & MAIN_EVENT_VAD_CHANGE) {
+        if (bits & MAIN_EVENT_VAD_CHANGE) {/*触发VAD状态变更事件*/
             if (GetDeviceState() == kDeviceStateListening) {
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
             }
         }
 
-        if (bits & MAIN_EVENT_SCHEDULE) {
+        if (bits & MAIN_EVENT_SCHEDULE) {/*调度任务执行*/
             std::unique_lock<std::mutex> lock(mutex_);
             auto tasks = std::move(main_tasks_);
             lock.unlock();
@@ -246,34 +248,34 @@ void Application::Run() {
             }
         }
 
-        if (bits & MAIN_EVENT_CLOCK_TICK) {
+        if (bits & MAIN_EVENT_CLOCK_TICK) {/*触发定时器事件*/
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
         
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
-                SystemInfo::PrintHeapStats();
+                SystemInfo::PrintHeapStats();/*打印堆栈信息*/
             }
         }
     }
 }
 
-void Application::HandleNetworkConnectedEvent() {
+void Application::HandleNetworkConnectedEvent() {/*处理连接网络事件*/
     ESP_LOGI(TAG, "Network connected");
-    auto state = GetDeviceState();
+    auto state = GetDeviceState();/*返回当前设备状态*/
 
-    if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
+    if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {/*判断是否进入激活状态，仅在启动和配网两种状态下*/
         // Network is ready, start activation
-        SetDeviceState(kDeviceStateActivating);
-        if (activation_task_handle_ != nullptr) {
+        SetDeviceState(kDeviceStateActivating);/*设置设备状态为激活中*/
+        if (activation_task_handle_ != nullptr) {/*判断激活任务是否已运行*/
             ESP_LOGW(TAG, "Activation task already running");
             return;
         }
 
         xTaskCreate([](void* arg) {
-            Application* app = static_cast<Application*>(arg);
-            app->ActivationTask();
+            Application* app = static_cast<Application*>(arg);/*将 FreeRTOS 任务入口函数中的 void* 参数，安全地还原为原始的 C++ 对象指针*/
+            app->ActivationTask();/*指向激活任务*/
             app->activation_task_handle_ = nullptr;
             vTaskDelete(NULL);
         }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
@@ -321,54 +323,54 @@ void Application::HandleActivationDoneEvent() {
     });
 }
 
-void Application::ActivationTask() {
+void Application::ActivationTask() {/*激活任务*/
     // Create OTA object for activation process
-    ota_ = std::make_unique<Ota>();
+    ota_ = std::make_unique<Ota>();/*创建OTA对象*/
 
     // Check for new assets version
-    CheckAssetsVersion();
+    CheckAssetsVersion();/*检查新的资源版本*/
 
     // Check for new firmware version
-    CheckNewVersion();
+    CheckNewVersion();/*检查新的固件版本并更新*/
 
     // Initialize the protocol
-    InitializeProtocol();
+    InitializeProtocol();/*初始化协议*/
 
     // Signal completion to main loop
-    xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
+    xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);/*设置激活完成事件成立*/
 }
 
-void Application::CheckAssetsVersion() {
+void Application::CheckAssetsVersion() {/*检查新的资源版本*/
     // Only allow CheckAssetsVersion to be called once
-    if (assets_version_checked_) {
+    if (assets_version_checked_) {/*确保仅执行一次*/
         return;
     }
     assets_version_checked_ = true;
 
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
-    auto& assets = Assets::GetInstance();
+    auto& board = Board::GetInstance();/*开发板实例*/
+    auto display = board.GetDisplay();/*屏幕显示实例*/
+    auto& assets = Assets::GetInstance();/*资源管理器实例*/
 
-    if (!assets.partition_valid()) {
+    if (!assets.partition_valid()) {/*资源分区是否合法*/
         ESP_LOGW(TAG, "Assets partition is disabled for board %s", BOARD_NAME);
         return;
     }
     
-    Settings settings("assets", true);
+    Settings settings("assets", true);/*打开NVS中的assets空间，NVS类似于数据库*/
     // Check if there is a new assets need to be downloaded
-    std::string download_url = settings.GetString("download_url");
-
-    if (!download_url.empty()) {
-        settings.EraseKey("download_url");
-
+    std::string download_url = settings.GetString("download_url");/*从NVS中读取新的资源下载地址，如果存在则需要下载新的资源包*/
+    /*当配置智库台的主题配置时会获得到download_url,正常情况下download_url为空by lctest*/
+    if (!download_url.empty()) {/*下载地址非空*/
+        settings.EraseKey("download_url");/*删除下载标志（防止重复下载）*/
+        /*构造提示信息并提示用户*/
         char message[256];
         snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, download_url.c_str());
         Alert(Lang::Strings::LOADING_ASSETS, message, "cloud_arrow_down", Lang::Sounds::OGG_UPGRADE);
         
-        // Wait for the audio service to be idle for 3 seconds
+        /*等待音频服务空闲3秒*/
         vTaskDelay(pdMS_TO_TICKS(3000));
-        SetDeviceState(kDeviceStateUpgrading);
-        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        SetDeviceState(kDeviceStateUpgrading);/*设置设备状态升级中*/
+        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);/*设置为性能模式*/
         display->SetChatMessage("system", Lang::Strings::PLEASE_WAIT);
 
         bool success = assets.Download(download_url, [this, display](int progress, size_t speed) -> void {
@@ -379,7 +381,7 @@ void Application::CheckAssetsVersion() {
             });
         });
 
-        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);/*设置为低功耗模式*/
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         if (!success) {

@@ -16,7 +16,7 @@
 #include <cbin_font.h>
 
 
-#define TAG "Assets"
+#define TAG "Assets"/*日志标签财产*/
 #define PARTITION_LABEL "assets"
 
 struct mmap_assets_table {

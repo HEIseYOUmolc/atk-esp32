@@ -350,13 +350,13 @@ void McpServer::AddUserOnlyTool(const std::string& name, const std::string& desc
     AddTool(tool);
 }
 
-void McpServer::ParseMessage(const std::string& message) {
+void McpServer::ParseMessage(const std::string& message) {/*解析MCP消息string to json*/
     cJSON* json = cJSON_Parse(message.c_str());
     if (json == nullptr) {
         ESP_LOGE(TAG, "Failed to parse MCP message: %s", message.c_str());
         return;
     }
-    ParseMessage(json);
+    ParseMessage(json);/*重载*/
     cJSON_Delete(json);
 }
 
@@ -379,7 +379,7 @@ void McpServer::ParseCapabilities(const cJSON* capabilities) {
     }
 }
 
-void McpServer::ParseMessage(const cJSON* json) {
+void McpServer::ParseMessage(const cJSON* json) {/*按照JSONRPC协议解析*/
     // Check JSONRPC version
     auto version = cJSON_GetObjectItem(json, "jsonrpc");
     if (version == nullptr || !cJSON_IsString(version) || strcmp(version->valuestring, "2.0") != 0) {
@@ -464,7 +464,7 @@ void McpServer::ParseMessage(const cJSON* json) {
     }
 }
 
-void McpServer::ReplyResult(int id, const std::string& result) {
+void McpServer::ReplyResult(int id, const std::string& result) {/*返回结果*/
     std::string payload = "{\"jsonrpc\":\"2.0\",\"id\":";
     payload += std::to_string(id) + ",\"result\":";
     payload += result;
