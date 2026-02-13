@@ -370,21 +370,21 @@ void Application::CheckAssetsVersion() {/*检查新的资源版本*/
         /*等待音频服务空闲3秒*/
         vTaskDelay(pdMS_TO_TICKS(3000));
         SetDeviceState(kDeviceStateUpgrading);/*设置设备状态升级中*/
-        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);/*设置为性能模式*/
+        board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);/*设置为性能模式，保证下载完整进行*/
         display->SetChatMessage("system", Lang::Strings::PLEASE_WAIT);
 
         bool success = assets.Download(download_url, [this, display](int progress, size_t speed) -> void {
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-            Schedule([display, message = std::string(buffer)]() {
-                display->SetChatMessage("system", message.c_str());
+            Schedule([display, message = std::string(buffer)]() {/*Schedule函数提交至主线程运行*/
+                display->SetChatMessage("system", message.c_str());/*显示在屏幕消息区域，下载进度和下载速度*/
             });
         });
 
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);/*设置为低功耗模式*/
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        if (!success) {
+        if (!success) {/*如果下载失败*/
             Alert(Lang::Strings::ERROR, Lang::Strings::DOWNLOAD_ASSETS_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
             vTaskDelay(pdMS_TO_TICKS(2000));
             SetDeviceState(kDeviceStateActivating);
@@ -394,30 +394,31 @@ void Application::CheckAssetsVersion() {/*检查新的资源版本*/
 
     // Apply assets
     assets.Apply();
-    display->SetChatMessage("system", "");
-    display->SetEmotion("microchip_ai");
+    display->SetChatMessage("system", "");/*清除系统消息*/
+    display->SetEmotion("microchip_ai");/*设置表情为microchip_ai，表示资源已更新完成*/
 }
 
-void Application::CheckNewVersion() {
-    const int MAX_RETRY = 10;
-    int retry_count = 0;
+void Application::CheckNewVersion() {/*检查新的固件版本*/
+    const int MAX_RETRY = 10;/*最大重试次数设置为10次*/
+    int retry_count = 0;/*初始重试次数为0*/
     int retry_delay = 10; // Initial retry delay in seconds
 
     auto& board = Board::GetInstance();
     while (true) {
         auto display = board.GetDisplay();
-        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);/*上方显示：检查新版本。。。*/
 
-        esp_err_t err = ota_->CheckVersion();
-        if (err != ESP_OK) {
-            retry_count++;
+        esp_err_t err = ota_->CheckVersion();/*检查新版本，返回错误码*/
+        if (err != ESP_OK) {/*检查失败*/
+            retry_count++;/*重试次数计数+1*/
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
                 return;
             }
-
+            /*打印错误代码和下载地址*/
             char error_message[128];
             snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
+            /*构造提示信息并提示用户检查新版本失败，10秒后重试，加错误代码和下载地址*/
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
             Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
@@ -435,50 +436,49 @@ void Application::CheckNewVersion() {
         retry_count = 0;
         retry_delay = 10; // Reset retry delay
 
-        if (ota_->HasNewVersion()) {
+        if (ota_->HasNewVersion()) {/*存在新版本*/
             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
                 return; // This line will never be reached after reboot
             }
             // If upgrade failed, continue to normal operation
         }
-
-        // No new version, mark the current version as valid
+        /*没有新版本，标记当前版本有效*/
         ota_->MarkCurrentVersionValid();
-        if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
+        if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {/*设备已经激活完成*/
             // Exit the loop if done checking new version
             break;
         }
 
-        display->SetStatus(Lang::Strings::ACTIVATION);
+        display->SetStatus(Lang::Strings::ACTIVATION);/*设置UI状态栏显示激活设备*/
         // Activation code is shown to the user and waiting for the user to input
-        if (ota_->HasActivationCode()) {
-            ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
+        if (ota_->HasActivationCode()) {/*存在激活码*/
+            ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());/*显示激活码*/
         }
 
         // This will block the loop until the activation is done or timeout
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < 10; ++i) {/*循环10次尝试激活设备，仅激活成功和设备空闲退出循环*/
             ESP_LOGI(TAG, "Activating... %d/%d", i + 1, 10);
-            esp_err_t err = ota_->Activate();
-            if (err == ESP_OK) {
+            esp_err_t err = ota_->Activate();/*激活设备*/
+            if (err == ESP_OK) {/*激活成功*/
                 break;
-            } else if (err == ESP_ERR_TIMEOUT) {
+            } else if (err == ESP_ERR_TIMEOUT) {/*激活超时*/
                 vTaskDelay(pdMS_TO_TICKS(3000));
-            } else {
+            } else {/*网络异常*/
                 vTaskDelay(pdMS_TO_TICKS(10000));
             }
-            if (GetDeviceState() == kDeviceStateIdle) {
+            if (GetDeviceState() == kDeviceStateIdle) {/*设备空闲状态*/
                 break;
             }
         }
     }
 }
 
-void Application::InitializeProtocol() {
+void Application::InitializeProtocol() {/*初始化协议*/
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
-    auto codec = board.GetAudioCodec();
+    auto codec = board.GetAudioCodec();/*音频编解码器对象*/
 
-    display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+    display->SetStatus(Lang::Strings::LOADING_PROTOCOL);/*状态栏显示登陆服务器。。。*/
 
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
